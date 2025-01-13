@@ -1,7 +1,7 @@
 from environs import Env
 from dataclasses import dataclass
 from typing import Optional
-
+from sqlalchemy import URL
 
 @dataclass
 class DB:
@@ -10,7 +10,12 @@ class DB:
     database: str
     host: str
     port: Optional[int]
+    
+    url: URL
 
+@dataclass
+class DBurl():
+    url: URL
 
 @dataclass
 class Redis:
@@ -42,21 +47,30 @@ class Config:
 def load_config() -> Config:
     env = Env()
     env.read_env()
-
+    user, password, database, host, port = [env.str(data) for data
+                                            in ["DB_USER", "DB_PASSWORD", "DB_DATABASE", "DB_HOST", "DB_PORT"]]
     return Config(
         tgbot=TgBot(
             token=env.str("TOKEN"),
             admins=env.list("ADMINS"),
         ),
         db=DB(
-            user=env.str("DB_USER"),
-            password=env.str("DB_PASSWORD"),
-            database=env.str("DB_DATABASE"),
-            host=env.str("DB_HOST"),
-            port=env.str("DB_PORT")
+                user=user,
+                password=password,
+                database=database,
+                host=host,
+                port=port,
+                
+                url=URL.create(
+                f"postgresql+asyncpg",
+                username=user,
+                host=host,
+                port=port,
+                password=password,
+                database=database
+            ).render_as_string(hide_password=False)
         ),
         redis=Redis(
-
             use_redis=env.str("USE_REDIS"),
             password=env.str("REDIS_PASS"),
             host=env.str("REDIS_HOST"),

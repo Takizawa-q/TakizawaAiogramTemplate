@@ -1,1 +1,1 @@
-from . import text as text
+from . admin import AdminFilter
