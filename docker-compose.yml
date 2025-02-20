@@ -1,0 +1,13 @@
+services:
+  bot:
+    image: "bot"
+    build:
+      context: .
+    working_dir: /app
+    command: python3 -m main
+    restart: always
+    env_file:
+      - ".env"
+    environment:
+      TZ: "Europe/Moscow"
+      command: >

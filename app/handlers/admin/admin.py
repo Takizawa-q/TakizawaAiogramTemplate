@@ -1,4 +1,4 @@
-from aiogram.types import Message, CallbackQuery
+from aiogram.types import Message, CallbackQuery, ContentType, FSInputFile
 from aiogram.fsm.context import FSMContext
 from aiogram import Bot
 from app.handlers.states import AdminMailing
@@ -16,19 +16,20 @@ async def start(msg: Message, state: FSMContext):
     await msg.answer("<b>Admin Menu</b>", reply_markup=buttons)
     await state.clear()
 
-async def statistics(call: CallbackQuery, state: FSMContext, session_maker):
-    count_users = await db.get_count_users(session_maker=session_maker)
-    text = f"<b>Количество пользователей бота: <code>{count_users.all}</code></b>\n\n" \
-           f"За день: <code>{count_users.day}</code>\n" \
-           f"За неделю: <code>{count_users.week}</code>\n" \
-           f"За месяц: <code>{count_users.month}</code>"
-    btn = InlineKeyboardConstructor(buttons=[InlineButton("🔙 Назад", callback_data="admin_back_from_statistics")],
-                                    schema=[1])
-    await call.message.answer(text, reply_markup=btn)
+# async def statistics(call: CallbackQuery, state: FSMContext, session_maker):
+#     count_users = await db.get_count_users(session_maker=session_maker)
+#     text = f"<b>Количество пользователей бота: <code>{count_users.all}</code></b>\n\n" \
+#            f"За день: <code>{count_users.day}</code>\n" \
+#            f"За неделю: <code>{count_users.week}</code>\n" \
+#            f"За месяц: <code>{count_users.month}</code>"
+#     btn = InlineKeyboardConstructor(buttons=[InlineButton("🔙 Назад", callback_data="admin_back_from_statistics")],
+#                                     schema=[1])
+#     await call.message.answer(text, reply_markup=btn)
 
 async def mailing_menu(call: CallbackQuery | Message, state: FSMContext, bot: Bot):
     buttons = InlineKeyboardConstructor(buttons=[InlineButton("✍️ Изменить текст", callback_data="admin_catch_text"),
                                                 InlineButton("📷 Добавить фото", callback_data="admin_catch_photo"),
+                                                InlineButton("🗣 Добавить голосовое", callback_data="admin_catch_voice"),
                                                 InlineButton("📤 Отправить рассылку", callback_data="admin_finish_mailing")],
                                         schema=[1, 1, 1])
     data = await state.get_data()
@@ -36,15 +37,21 @@ async def mailing_menu(call: CallbackQuery | Message, state: FSMContext, bot: Bo
         text = data["text"]
     except Exception:
         text = "Нет"
+    try:
+        voice = data["voice"]
+    except Exception:
+        voice = "Нет"
+    text = f"Текст: {text}\nГолосовое: {voice}"
     if isinstance(call, CallbackQuery):
         message = call.message
-        mailing_menu = await message.edit_text(f"Текст: Нет",
+        mailing_menu = await message.edit_text(text,
                                 reply_markup=buttons)
         mailing_menu_id = mailing_menu.message_id
         await state.update_data(mailing_menu_id=mailing_menu_id)
     else:
         message = call
         mailing_menu_id = data["mailing_menu_id"]
+        print(data)
         if "photo_id" in data:
             
             photo_id = data["photo_id"]
@@ -53,12 +60,23 @@ async def mailing_menu(call: CallbackQuery | Message, state: FSMContext, bot: Bo
                                         message_id=mailing_menu_id,
                                         reply_markup=buttons)
         else:
-            await bot.edit_message_text(text=f"Текст:\n{text}",
+            await bot.edit_message_text(text=text,
                                     chat_id=message.from_user.id,
                                     message_id=mailing_menu_id,
                                     reply_markup=buttons)
             
+async def catch_voice(call: CallbackQuery, state: FSMContext):
     
+    await state.set_state(AdminMailing.voice)
+    message = await call.message.answer("Пришлите голосовое сообщение: ")    
+
+async def edit_voice(message: Message, bot, state: FSMContext):
+    if message.content_type == ContentType.VOICE:
+        voice = await bot.get_file(file_id=message.voice.file_id)
+        await bot.download_file(file_path=voice.file_path, destination="voice.mp3")
+        await state.update_data(voice="Да")
+        await mailing_menu(call=message, state=state, bot=bot)
+
 async def catch_text(call: CallbackQuery, state: FSMContext):
     message = await call.message.answer("Пришлите текст:")
     mailing_delete_id = message.message_id
@@ -85,7 +103,7 @@ async def edit_photo(message: Message, bot: Bot, state: FSMContext):
     await state.update_data(photo_id=message.photo[-1].file_id)
     await mailing_menu(message, state, bot)
 
-async def finish_mail(call: CallbackQuery, bot: Bot, session_maker, state: FSMContext):
+async def finish_mail(call: CallbackQuery, bot: Bot, state: FSMContext, session_maker):
     data = await state.get_data()
     text = data["text"]
     users: list[db.UserDTO] = await db.get_all_users(session_maker)
@@ -93,16 +111,21 @@ async def finish_mail(call: CallbackQuery, bot: Bot, session_maker, state: FSMCo
     for user in users:
         try:
             if "photo_id" in data:
-                await bot.send_photo(chat_id=user.user_id,
+                await bot.send_photo(chat_id=user[0],
                                     photo=data["photo_id"],
                                     caption=text)
+            elif "voice" in data:
+                await bot.send_voice(chat_id=user[0],
+                                     voice=FSInputFile(path='voice.mp3'),
+                                     caption=text)
             else:
-                await bot.send_message(chat_id=user.user_id,
+                await bot.send_message(chat_id=user[0],
                                     text=text)
             good += 1
+            
         except Exception as e:
             print(e)
             error += 1
-        await asyncio.sleep(0.5)
+        await asyncio.sleep(0.09)
     await call.message.answer(f"✅ <b>Рассылка закончена!</b>\n\nУдачно отправлено: <code>{good}</code>\nНе отправилось: <code>{error}</code>")
         
